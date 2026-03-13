@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# env files (never commit secrets)
+.env
+.env.local
+.env*.local
+
+# CDK
+cdk/cdk.out/
+cdk/dist/
+cdk/node_modules/
+
+# misc
+.DS_Store
+*.log
