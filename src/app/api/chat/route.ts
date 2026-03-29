@@ -1,46 +1,92 @@
 import { NextRequest } from 'next/server';
-import { InvokeAgentCommand } from '@aws-sdk/client-bedrock-agent-runtime';
-import { getBedrockClient } from '@/lib/bedrock';
 
 export const runtime = 'nodejs';
 
+const AGENT_URL = process.env.AGENT_URL ?? 'http://localhost:8080';
+
 export async function POST(req: NextRequest) {
   const { message, sessionId } = await req.json();
-
-  const agentId = process.env.BEDROCK_AGENT_ID;
-  const agentAliasId = process.env.BEDROCK_AGENT_ALIAS_ID;
-
-  if (!agentId || !agentAliasId) {
-    return new Response('BEDROCK_AGENT_ID and BEDROCK_AGENT_ALIAS_ID must be set', {
-      status: 500,
-    });
-  }
 
   if (!message || !sessionId) {
     return new Response('message and sessionId are required', { status: 400 });
   }
 
-  const client = getBedrockClient();
-
-  const command = new InvokeAgentCommand({
-    agentId,
-    agentAliasId,
-    sessionId,
-    inputText: message,
+  // Call the local Strands agent
+  const agentRes = await fetch(`${AGENT_URL}/invocations`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
+    },
+    body: JSON.stringify({ prompt: message }),
   });
+
+  if (!agentRes.ok || !agentRes.body) {
+    return new Response(`Agent error: ${agentRes.status}`, { status: 502 });
+  }
+
+  // The agent returns SSE (data: "..."\n\n). Parse it and forward as NDJSON.
+  const reader = agentRes.body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
+      let buffer = '';
       try {
-        const response = await client.send(command);
-        if (!response.completion) {
-          controller.close();
-          return;
-        }
-        for await (const event of response.completion) {
-          const bytes = event.chunk?.bytes;
-          if (bytes) {
-            controller.enqueue(bytes);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // Process complete SSE events from the buffer
+          const lines = buffer.split('\n');
+          buffer = lines.pop() ?? ''; // keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+
+            const payload = line.slice(6).trim();
+            if (!payload) continue;
+
+            // [DONE] sentinel — pass through
+            if (payload === '[DONE]') {
+              controller.enqueue(encoder.encode('[DONE]\n'));
+              continue;
+            }
+
+            try {
+              const parsed = JSON.parse(payload);
+
+              // Typed JSON events from the updated Python server
+              if (parsed && typeof parsed === 'object' && parsed.type) {
+                controller.enqueue(
+                  encoder.encode(JSON.stringify(parsed) + '\n')
+                );
+              }
+              // Legacy fallback: bare string (old server format)
+              else if (typeof parsed === 'string') {
+                controller.enqueue(
+                  encoder.encode(
+                    JSON.stringify({ type: 'text', content: parsed }) + '\n'
+                  )
+                );
+              }
+              // Error from agent
+              else if (parsed.error) {
+                controller.enqueue(
+                  encoder.encode(
+                    JSON.stringify({
+                      type: 'text',
+                      content: `\n[Error: ${parsed.error}]`,
+                    }) + '\n'
+                  )
+                );
+              }
+            } catch {
+              // Not valid JSON, skip
+            }
           }
         }
       } catch (err) {
@@ -52,6 +98,6 @@ export async function POST(req: NextRequest) {
   });
 
   return new Response(stream, {
-    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    headers: { 'Content-Type': 'application/x-ndjson; charset=utf-8' },
   });
 }
