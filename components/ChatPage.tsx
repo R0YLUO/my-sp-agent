@@ -90,6 +90,7 @@ export default function ChatPage() {
       let currentTools: ToolIndicator[] = [];
       let cycleEnded = false;
       let cycleCount = 0;
+      let pendingClear = false; // true = defer clearing old content until new text/tool arrives
 
       // Helper: push current local state → React state
       const flushToReact = (overrides: Partial<Message> = {}) => {
@@ -155,9 +156,9 @@ export default function ChatPage() {
                 cycleCount++;
 
                 if (cycleEnded) {
-                  // Previous cycle completed — clear its intermediate content
-                  currentContent = '';
-                  currentTools = [];
+                  // Defer clearing until the new cycle actually produces content,
+                  // so the previous cycle's text stays visible as long as possible.
+                  pendingClear = true;
                   cycleEnded = false;
                 }
                 // else: first cycle, nothing to clear
@@ -168,6 +169,11 @@ export default function ChatPage() {
               }
 
               case 'text': {
+                if (pendingClear) {
+                  currentContent = '';
+                  currentTools = [];
+                  pendingClear = false;
+                }
                 currentContent += event.content;
                 // Flush on every text chunk so the user sees streaming
                 flushToReact({ isWorking: cycleCount > 1 });
@@ -175,6 +181,11 @@ export default function ChatPage() {
               }
 
               case 'tool_start': {
+                if (pendingClear) {
+                  currentContent = '';
+                  currentTools = [];
+                  pendingClear = false;
+                }
                 currentTools.push({ tool: event.tool });
                 // Tools always imply working state
                 flushToReact({ isWorking: true });
