@@ -3,9 +3,11 @@
 import { useState, useCallback, useRef } from 'react';
 import { Message, StreamEvent, ToolIndicator } from '../types/chat';
 import { useSession } from '../hooks/useSession';
+import { useFarmDetails } from '../hooks/useFarmDetails';
 import SessionSidebar from './SessionSidebar';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
+import FarmDetailsDrawer from './FarmDetailsDrawer';
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 11);
@@ -25,6 +27,15 @@ export default function ChatPage() {
   const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({});
   const [isStreaming, setIsStreaming] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [farmDrawerOpen, setFarmDrawerOpen] = useState(false);
+
+  const {
+    farmDetails,
+    loading: farmLoading,
+    saving: farmSaving,
+    error: farmError,
+    updateFarmDetails,
+  } = useFarmDetails();
 
   // Ref to hold the latest activeSessionId for use inside async callbacks
   const activeSessionRef = useRef(activeSessionId);
@@ -278,12 +289,42 @@ export default function ChatPage() {
               {sessions.find((s) => s.id === activeSessionId)?.name ?? ''}
             </span>
           )}
+          {/* My Farm Details button — pushed to the right */}
+          <button
+            onClick={() => setFarmDrawerOpen(true)}
+            className="ml-auto flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1h-2z"
+              />
+            </svg>
+            <span className="hidden sm:inline">My Farm Details</span>
+          </button>
         </header>
         <div className="flex flex-col flex-1 max-w-3xl w-full mx-auto overflow-hidden">
           <MessageList messages={messages} />
           <ChatInput onSend={sendMessage} disabled={isStreaming} />
         </div>
       </div>
+      {/* Farm details drawer */}
+      <FarmDetailsDrawer
+        open={farmDrawerOpen}
+        onClose={() => setFarmDrawerOpen(false)}
+        farmDetails={farmDetails}
+        loading={farmLoading}
+        saving={farmSaving}
+        error={farmError}
+        onSave={updateFarmDetails}
+      />
     </div>
   );
 }

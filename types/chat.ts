@@ -50,3 +50,17 @@ export interface Message {
   activeTools?: ToolIndicator[];
   isWorking?: boolean;
 }
+
+// --- Farm details ---
+
+export interface FarmDetails {
+  location: string;
+  pasture_type: string;
+  grazing_area_hectares: number;
+  livestock_head_count: number;
+  livestock_breed: string;
+  livestock_class: string;
+  livestock_avg_weight_kg: number;
+  seasonal_condition_decile: number;
+  month: string;
+}
