@@ -9,11 +9,6 @@ export interface Session {
 
 // --- Streaming event types (from API route to client) ---
 
-export interface ReasoningEvent {
-  type: 'reasoning';
-  content: string;
-}
-
 export interface TextEvent {
   type: 'text';
   content: string;
@@ -25,18 +20,24 @@ export interface ToolStartEvent {
   input: Record<string, unknown>;
 }
 
-export type StreamEvent = ReasoningEvent | TextEvent | ToolStartEvent;
+export interface CycleStartEvent {
+  type: 'cycle_start';
+}
 
-// --- Thinking step (accumulated in the UI) ---
+export interface CycleEndEvent {
+  type: 'cycle_end';
+}
 
-export type ThinkingStepKind = 'reasoning' | 'tool';
+export type StreamEvent =
+  | TextEvent
+  | ToolStartEvent
+  | CycleStartEvent
+  | CycleEndEvent;
 
-export interface ThinkingStep {
-  id: string;
-  kind: ThinkingStepKind;
-  content: string;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
+// --- Tool indicator (for display in working block) ---
+
+export interface ToolIndicator {
+  tool: string;
 }
 
 // --- Message ---
@@ -46,5 +47,6 @@ export interface Message {
   role: Role;
   content: string;
   isStreaming?: boolean;
-  thinkingSteps?: ThinkingStep[];
+  activeTools?: ToolIndicator[];
+  isWorking?: boolean;
 }

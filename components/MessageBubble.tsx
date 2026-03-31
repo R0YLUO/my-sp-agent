@@ -3,7 +3,8 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Message } from '../types/chat';
-import ThinkingSteps from './ThinkingSteps';
+import WorkingBlock from './WorkingBlock';
+import CodeBlock from './CodeBlock';
 
 interface Props {
   message: Message;
@@ -11,8 +12,8 @@ interface Props {
 
 export default function MessageBubble({ message }: Props) {
   const isUser = message.role === 'user';
-  const hasThinking =
-    message.thinkingSteps && message.thinkingSteps.length > 0;
+  const showWorking = message.isWorking ?? false;
+  const tools = message.activeTools ?? [];
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -23,22 +24,41 @@ export default function MessageBubble({ message }: Props) {
             : 'bg-white text-gray-800 shadow-sm border border-gray-100 rounded-bl-sm'
         }`}
       >
-        {/* Thinking steps (assistant only, above main content) */}
-        {!isUser && hasThinking && (
-          <ThinkingSteps
-            steps={message.thinkingSteps!}
-            isStreaming={!!message.isStreaming}
+        {/* Working block (assistant only, during intermediate cycles) */}
+        {!isUser && showWorking && (
+          <WorkingBlock
+            content={message.content}
+            activeTools={tools}
+            isWorking={true}
           />
         )}
 
-        {/* Main message content */}
+        {/* Final message content (not working — render full markdown) */}
         {isUser ? (
           message.content
         ) : (
           <>
-            {message.content && (
-              <div className="prose prose-sm prose-gray max-w-none prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:before:content-none prose-code:after:content-none prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-sm">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {!showWorking && message.content && (
+              <div className="prose prose-sm prose-gray max-w-none prose-pre:my-0 prose-pre:bg-transparent prose-pre:p-0 prose-code:before:content-none prose-code:after:content-none">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    pre({ children }) {
+                      return (
+                        <pre className="not-prose my-4 overflow-hidden rounded-lg">
+                          {children}
+                        </pre>
+                      );
+                    },
+                    code({ className, children, ...rest }) {
+                      return (
+                        <CodeBlock className={className} {...rest}>
+                          {children}
+                        </CodeBlock>
+                      );
+                    },
+                  }}
+                >
                   {message.content}
                 </ReactMarkdown>
               </div>
@@ -46,8 +66,8 @@ export default function MessageBubble({ message }: Props) {
           </>
         )}
 
-        {/* Streaming cursor */}
-        {message.isStreaming && (
+        {/* Streaming cursor (only when streaming final content, not during working) */}
+        {message.isStreaming && !showWorking && (
           <span className="inline-block w-1.5 h-4 ml-0.5 bg-current align-middle animate-pulse rounded-sm" />
         )}
       </div>

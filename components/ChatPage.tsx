@@ -1,18 +1,14 @@
 'use client';
 
 import { useState, useCallback, useRef } from 'react';
-import { Message, ThinkingStep, StreamEvent } from '../types/chat';
+import { Message, StreamEvent, ToolIndicator } from '../types/chat';
 import { useSession } from '../hooks/useSession';
 import SessionSidebar from './SessionSidebar';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 
-let stepCounter = 0;
 function generateId(): string {
   return Math.random().toString(36).slice(2, 11);
-}
-function generateStepId(): string {
-  return `step-${++stepCounter}`;
 }
 
 export default function ChatPage() {
@@ -68,7 +64,8 @@ export default function ChatPage() {
         role: 'assistant',
         content: '',
         isStreaming: true,
-        thinkingSteps: [],
+        isWorking: false,
+        activeTools: [],
       };
 
       updateMessages(sessionId, (prev) => [...prev, userMsg, assistantMsg]);
@@ -76,6 +73,28 @@ export default function ChatPage() {
 
       // Capture the sessionId for the rest of this async flow
       const currentSessionId = sessionId;
+
+      // --- LOCAL cycle tracking state (not React state) ---
+      let currentContent = '';
+      let currentTools: ToolIndicator[] = [];
+      let cycleEnded = false;
+      let cycleCount = 0;
+
+      // Helper: push current local state → React state
+      const flushToReact = (overrides: Partial<Message> = {}) => {
+        updateMessages(currentSessionId, (prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content: currentContent,
+                  activeTools: [...currentTools],
+                  ...overrides,
+                }
+              : m
+          )
+        );
+      };
 
       const controller = new AbortController();
 
@@ -121,54 +140,40 @@ export default function ChatPage() {
 
             // Dispatch based on event type
             switch (event.type) {
-              case 'reasoning': {
-                const step: ThinkingStep = {
-                  id: generateStepId(),
-                  kind: 'reasoning',
-                  content: event.content,
-                };
-                updateMessages(currentSessionId, (prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? {
-                          ...m,
-                          thinkingSteps: [...(m.thinkingSteps ?? []), step],
-                        }
-                      : m
-                  )
-                );
-                break;
-              }
+              case 'cycle_start': {
+                cycleCount++;
 
-              case 'tool_start': {
-                const step: ThinkingStep = {
-                  id: generateStepId(),
-                  kind: 'tool',
-                  content: `Using ${event.tool}`,
-                  toolName: event.tool,
-                  toolInput: event.input,
-                };
-                updateMessages(currentSessionId, (prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? {
-                          ...m,
-                          thinkingSteps: [...(m.thinkingSteps ?? []), step],
-                        }
-                      : m
-                  )
-                );
+                if (cycleEnded) {
+                  // Previous cycle completed — clear its intermediate content
+                  currentContent = '';
+                  currentTools = [];
+                  cycleEnded = false;
+                }
+                // else: first cycle, nothing to clear
+
+                // Only show working indicator for multi-cycle responses (cycleCount > 1)
+                flushToReact({ isWorking: cycleCount > 1 });
                 break;
               }
 
               case 'text': {
-                updateMessages(currentSessionId, (prev) =>
-                  prev.map((m) =>
-                    m.id === assistantId
-                      ? { ...m, content: m.content + event.content }
-                      : m
-                  )
-                );
+                currentContent += event.content;
+                // Flush on every text chunk so the user sees streaming
+                flushToReact({ isWorking: cycleCount > 1 });
+                break;
+              }
+
+              case 'tool_start': {
+                currentTools.push({ tool: event.tool });
+                // Tools always imply working state
+                flushToReact({ isWorking: true });
+                break;
+              }
+
+              case 'cycle_end': {
+                cycleEnded = true;
+                // Don't clear content yet — wait for next cycle_start or stream close
+                flushToReact();
                 break;
               }
             }
@@ -176,22 +181,25 @@ export default function ChatPage() {
         }
       } catch (err: unknown) {
         if (err instanceof Error && err.name !== 'AbortError') {
-          updateMessages(currentSessionId, (prev) =>
-            prev.map((m) =>
-              m.id === assistantId
-                ? {
-                    ...m,
-                    content: 'Error: failed to get a response.',
-                    isStreaming: false,
-                  }
-                : m
-            )
-          );
+          if (!currentContent) {
+            currentContent = 'Error: failed to get a response.';
+          }
         }
       } finally {
+        // --- Stream closed: commit final message ---
+        // currentContent was never cleared because no cycle_start followed
+        // the last cycle_end. This IS the final answer — persist it.
         updateMessages(currentSessionId, (prev) =>
           prev.map((m) =>
-            m.id === assistantId ? { ...m, isStreaming: false } : m
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content: currentContent,
+                  isStreaming: false,
+                  isWorking: false,
+                  activeTools: [],
+                }
+              : m
           )
         );
         setIsStreaming(false);
